@@ -41,7 +41,9 @@ const Auth = () => {
     const password = formData.get("password") as string;
     const fullName = formData.get("fullName") as string;
 
-    const { error } = await supabase.auth.signUp({
+    console.log("Attempting signup for:", email);
+
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
@@ -51,10 +53,15 @@ const Auth = () => {
     });
 
     if (error) {
+      console.error("Signup error:", error);
       toast.error(error.message);
-    } else {
+    } else if (data?.user) {
+      console.log("Signup successful:", data.user.id);
       toast.success("Account created! Please complete your profile.");
       navigate("/complete-profile");
+    } else {
+      console.error("Signup failed: No user returned");
+      toast.error("Signup failed. Please try again.");
     }
     setIsLoading(false);
   };
