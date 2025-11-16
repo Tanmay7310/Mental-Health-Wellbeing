@@ -57,8 +57,8 @@ const Auth = () => {
       toast.error(error.message);
     } else if (data?.user) {
       console.log("Signup successful:", data.user.id);
-      toast.success("Account created! Please complete your profile.");
-      navigate("/complete-profile");
+      toast.success("Account created! Please complete the initial screening.");
+      navigate("/initial-screening");
     } else {
       console.error("Signup failed: No user returned");
       toast.error("Signup failed. Please try again.");
