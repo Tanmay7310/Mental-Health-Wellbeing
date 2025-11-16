@@ -35,12 +35,12 @@ const Dashboard = () => {
         .from("profiles")
         .select("*")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
       if (error) {
         console.error("Error fetching profile:", error);
         toast.error("Failed to load profile");
-      } else if (!profileData.home_address) {
+      } else if (!profileData || !profileData.home_address) {
         // Profile incomplete, redirect to complete profile
         navigate("/complete-profile");
       } else {

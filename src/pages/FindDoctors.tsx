@@ -1,17 +1,28 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, MapPin, Search, Navigation } from "lucide-react";
+import { ArrowLeft, MapPin, Search, Navigation, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const FindDoctors = () => {
   const navigate = useNavigate();
+  const locationState = useLocation();
   const [location, setLocation] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [diagnosis, setDiagnosis] = useState<string>("");
 
   useEffect(() => {
+    // Check if redirected from assessment results
+    const state = locationState.state as { searchTerm?: string; diagnosis?: string };
+    if (state?.searchTerm) {
+      setSearchTerm(state.searchTerm);
+    }
+    if (state?.diagnosis) {
+      setDiagnosis(state.diagnosis);
+    }
+
     // Get user's current location
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -24,7 +35,7 @@ const FindDoctors = () => {
         }
       );
     }
-  }, []);
+  }, [locationState]);
 
   const handleSearch = () => {
     // In a real app, this would search for nearby mental health professionals
@@ -64,6 +75,20 @@ const FindDoctors = () => {
             <p className="text-muted-foreground">Locate nearby doctors and therapists</p>
           </div>
         </div>
+
+        {diagnosis && (
+          <Card className="mb-6 border-2 border-primary">
+            <CardContent className="pt-6">
+              <div className="flex items-center gap-3">
+                <AlertCircle className="w-5 h-5 text-primary flex-shrink-0" />
+                <div>
+                  <p className="font-medium">Based on your assessment</p>
+                  <p className="text-sm text-muted-foreground">{diagnosis}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Search Card */}
         <Card className="mb-6">

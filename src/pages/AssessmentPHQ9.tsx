@@ -73,7 +73,7 @@ const AssessmentPHQ9 = () => {
       toast.error("Failed to save assessment");
     } else {
       toast.success("Assessment completed!");
-      navigate("/dashboard", { 
+      navigate("/assessment-results", { 
         state: { 
           assessmentResult: { 
             type: "PHQ-9 Depression Screening",
