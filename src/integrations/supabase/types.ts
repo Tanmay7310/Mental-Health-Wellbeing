@@ -79,36 +79,36 @@ export type Database = {
       }
       profiles: {
         Row: {
-          country: string
+          country: string | null
           created_at: string | null
           email: string
           full_name: string
-          home_address: string
+          home_address: string | null
           id: string
           phone: string | null
-          pincode: string
+          pincode: string | null
           updated_at: string | null
         }
         Insert: {
-          country: string
+          country?: string | null
           created_at?: string | null
           email: string
           full_name: string
-          home_address: string
+          home_address?: string | null
           id: string
           phone?: string | null
-          pincode: string
+          pincode?: string | null
           updated_at?: string | null
         }
         Update: {
-          country?: string
+          country?: string | null
           created_at?: string | null
           email?: string
           full_name?: string
-          home_address?: string
+          home_address?: string | null
           id?: string
           phone?: string | null
-          pincode?: string
+          pincode?: string | null
           updated_at?: string | null
         }
         Relationships: []
