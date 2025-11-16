@@ -17,13 +17,15 @@ const AssessmentResults = () => {
   const [result, setResult] = useState<AssessmentResult | null>(null);
 
   useEffect(() => {
-    const state = location.state as { assessmentResult?: AssessmentResult };
+    const state = location.state as { assessmentResult?: AssessmentResult; isInitialScreening?: boolean };
     if (state?.assessmentResult) {
       setResult(state.assessmentResult);
     } else {
       navigate("/dashboard");
     }
   }, [location, navigate]);
+
+  const isInitialScreening = (location.state as any)?.isInitialScreening;
 
   if (!result) return null;
 
@@ -160,9 +162,9 @@ const AssessmentResults = () => {
               <Button 
                 variant="ghost" 
                 className="w-full" 
-                onClick={() => navigate("/dashboard")}
+                onClick={() => navigate(isInitialScreening ? "/complete-profile" : "/dashboard")}
               >
-                Take Another Assessment
+                {isInitialScreening ? "Complete Your Profile" : "Take Another Assessment"}
               </Button>
             </div>
           </CardContent>
