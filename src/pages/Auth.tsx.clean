@@ -1,0 +1,273 @@
+import { useState, useEffect } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { getAuthData, clearAuthData } from "@/lib/auth-utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Heart } from "lucide-react";
+import { toast } from "sonner";
+
+// Define the user profile type
+type UserProfile = {
+  id: string;
+  email: string;
+  fullName: string;
+  phone?: string;
+  homeAddress?: string;
+  country?: string;
+  pincode?: string;
+  initialScreeningCompleted?: boolean;
+  [key: string]: any; // Allow additional properties
+};
+
+const Auth = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { login, register, user, loading: authLoading } = useAuth();
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("login");
+
+  // Function to redirect based on user profile
+  const redirectBasedOnProfile = (profile: UserProfile) => {
+    let targetPath = '/dashboard';
+    
+    if (profile.initialScreeningCompleted === false) {
+      targetPath = '/initial-screening';
+    } else if (!profile.homeAddress) {
+      targetPath = '/complete-profile';
+    }
+    
+    // Only redirect if we're not already on the target path
+    if (window.location.pathname !== targetPath) {
+      console.log('Redirecting to:', targetPath);
+      navigate(targetPath);
+    }
+  };
+
+  // Handle redirection based on authentication state
+  useEffect(() => {
+    const checkAuthAndRedirect = async () => {
+      const token = localStorage.getItem("accessToken");
+      
+      // If no token, we're definitely not authenticated
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+
+      // If we have a user object, we're already authenticated
+      if (user) {
+        redirectBasedOnProfile(user.profile);
+        return;
+      }
+
+      // If we have a token but no user object, try to get user data from localStorage
+      try {
+        const authData = getAuthData();
+        if (authData?.userProfile) {
+          // We have user data in localStorage, use it to redirect
+          redirectBasedOnProfile(authData.userProfile);
+        } else {
+          // No valid auth data, clear and stay on login
+          clearAuthData();
+          setIsLoading(false);
+        }
+      } catch (error) {
+        console.error("Error checking auth state:", error);
+        clearAuthData();
+        setIsLoading(false);
+      }
+    };
+
+    checkAuthAndRedirect();
+  }, [user, navigate]);
+
+  // Handle sign in form submission
+  const handleSignIn = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    const formData = new FormData(e.currentTarget);
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
+
+    try {
+      const response = await login(email, password);
+      
+      // After successful login, redirect based on the user's profile
+      if (response?.profile) {
+        redirectBasedOnProfile(response.profile);
+      } else {
+        // If no profile in response, try to get it from localStorage
+        const authData = getAuthData();
+        if (authData?.userProfile) {
+          redirectBasedOnProfile(authData.userProfile);
+        } else {
+          // Fallback to dashboard if we can't determine the profile
+          navigate('/dashboard');
+        }
+      }
+    } catch (error: any) {
+      console.error("Login error:", error);
+      
+      // Clear any invalid auth data
+      clearAuthData();
+      
+      // Show appropriate error message
+      if (error.isNetworkError || error.isCorsError || error.statusCode === 0) {
+        toast.error("Cannot connect to the server. Please check your internet connection and try again.");
+      } else if (error.status === 401) {
+        toast.error("Invalid email or password. Please try again.");
+      } else {
+        toast.error(error.message || "Login failed. Please try again.");
+      }
+      
+      setIsLoading(false);
+    }
+  };
+
+  // Handle sign up form submission
+  const handleSignUp = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    const formData = new FormData(e.currentTarget);
+    const email = formData.get("email") as string;
+    const password = formData.get("password") as string;
+    const fullName = formData.get("fullName") as string;
+
+    try {
+      await register(email, password, fullName);
+      // The register function will handle the redirection
+    } catch (error: any) {
+      console.error("Registration error:", error);
+      toast.error(error.message || "Registration failed. Please try again.");
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-secondary to-background p-4">
+      <Card className="w-full max-w-md shadow-lg">
+        <CardHeader className="text-center space-y-2">
+          <div className="mx-auto w-16 h-16 bg-primary rounded-full flex items-center justify-center mb-2">
+            <Heart className="w-8 h-8 text-primary-foreground" />
+          </div>
+          <CardTitle className="text-2xl font-bold">Mental Health Companion</CardTitle>
+          <CardDescription>Your journey to better mental wellness starts here</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Tabs 
+            value={activeTab} 
+            onValueChange={setActiveTab}
+            className="w-full"
+          >
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="login">Sign In</TabsTrigger>
+              <TabsTrigger value="register">Create Account</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="login" className="mt-6">
+              <form onSubmit={handleSignIn} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    placeholder="Enter your email"
+                    required
+                    disabled={isLoading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">Password</Label>
+                    <button
+                      type="button"
+                      className="text-sm font-medium text-primary hover:underline"
+                      onClick={() => {
+                        toast.info("Please contact support to reset your password.");
+                      }}
+                    >
+                      Forgot password?
+                    </button>
+                  </div>
+                  <Input
+                    id="password"
+                    name="password"
+                    type="password"
+                    placeholder="Enter your password"
+                    required
+                    disabled={isLoading}
+                  />
+                </div>
+                <Button 
+                  type="submit" 
+                  className="w-full" 
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Signing in..." : "Sign In"}
+                </Button>
+              </form>
+            </TabsContent>
+
+            <TabsContent value="register" className="mt-6">
+              <form onSubmit={handleSignUp} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="fullName">Full Name</Label>
+                  <Input
+                    id="fullName"
+                    name="fullName"
+                    type="text"
+                    placeholder="Enter your full name"
+                    required
+                    disabled={isLoading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    placeholder="Enter your email"
+                    required
+                    disabled={isLoading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Password</Label>
+                  <Input
+                    id="password"
+                    name="password"
+                    type="password"
+                    placeholder="Create a password"
+                    required
+                    minLength={8}
+                    disabled={isLoading}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Password must be at least 8 characters long
+                  </p>
+                </div>
+                <Button 
+                  type="submit" 
+                  className="w-full" 
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Creating account..." : "Create Account"}
+                </Button>
+              </form>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default Auth;

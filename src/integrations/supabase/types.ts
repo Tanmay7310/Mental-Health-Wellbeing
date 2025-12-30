@@ -85,6 +85,7 @@ export type Database = {
           full_name: string
           home_address: string | null
           id: string
+          initial_screening_completed: boolean | null
           phone: string | null
           pincode: string | null
           updated_at: string | null
@@ -96,6 +97,7 @@ export type Database = {
           full_name: string
           home_address?: string | null
           id: string
+          initial_screening_completed?: boolean | null
           phone?: string | null
           pincode?: string | null
           updated_at?: string | null
@@ -107,6 +109,7 @@ export type Database = {
           full_name?: string
           home_address?: string | null
           id?: string
+          initial_screening_completed?: boolean | null
           phone?: string | null
           pincode?: string | null
           updated_at?: string | null

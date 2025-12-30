@@ -1,64 +1,152 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Activity, Heart, Thermometer, ArrowLeft, AlertTriangle } from "lucide-react";
+import { Activity, Heart, Thermometer, ArrowLeft } from "lucide-react";
+import { MobileBottomNav } from "@/components/navigation/MobileBottomNav";
 
 const VitalMonitor = () => {
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
   const [vitals, setVitals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formData, setFormData] = useState({
+    heartRate: "",
+    bloodPressureSystolic: "",
+    bloodPressureDiastolic: "",
+    oxygenSaturation: "",
+    temperature: "",
+  });
 
   useEffect(() => {
-    loadVitals();
-  }, []);
+    if (authLoading) return;
 
-  const loadVitals = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    const token = localStorage.getItem("mindtrap_access_token");
+    if (!token && !user) {
       navigate("/auth");
       return;
     }
 
-    const { data, error } = await supabase
-      .from("vital_readings")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-      .limit(10);
+    loadVitals();
+  }, [authLoading, navigate]);
 
-    if (error) {
-      toast.error("Failed to load vitals");
-    } else {
-      setVitals(data || []);
+  const loadVitals = async () => {
+    setLoading(true);
+    try {
+      const response = await apiClient.getVitals({ page: 0, size: 10 });
+      setVitals(response.content || []);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to load vitals");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  const handleSimulateReading = async () => {
-    // Simulate adding a vital reading
-    const { data: { user } } = await supabase.auth.getUser();
+  const handleSubmitVitals = async (e: React.FormEvent) => {
+    e.preventDefault();
     
-    const mockVital = {
-      user_id: user!.id,
-      heart_rate: Math.floor(Math.random() * (100 - 60) + 60),
-      blood_pressure_systolic: Math.floor(Math.random() * (140 - 110) + 110),
-      blood_pressure_diastolic: Math.floor(Math.random() * (90 - 70) + 70),
-      oxygen_saturation: parseFloat((Math.random() * (100 - 95) + 95).toFixed(2)),
-      temperature: parseFloat((Math.random() * (99 - 97) + 97).toFixed(2)),
-      is_emergency: false,
-    };
-
-    const { error } = await supabase.from("vital_readings").insert(mockVital);
-
-    if (error) {
-      toast.error("Failed to record vitals");
-    } else {
-      toast.success("Vital signs recorded");
-      loadVitals();
+    const token = localStorage.getItem("mindtrap_access_token");
+    if (!token && !user) {
+      toast.error("You must be logged in");
+      navigate("/auth");
+      return;
     }
+
+    if (!formData.heartRate || !formData.bloodPressureSystolic || 
+        !formData.bloodPressureDiastolic || !formData.oxygenSaturation || 
+        !formData.temperature) {
+      toast.error("Please fill in all fields");
+      return;
+    }
+
+    setIsSubmitting(true);
+    
+    try {
+      const vitalData = {
+        heartRate: parseInt(formData.heartRate),
+        bloodPressureSystolic: parseInt(formData.bloodPressureSystolic),
+        bloodPressureDiastolic: parseInt(formData.bloodPressureDiastolic),
+        oxygenSaturation: parseFloat(formData.oxygenSaturation),
+        temperature: parseFloat(formData.temperature),
+      };
+
+      await apiClient.createVital(vitalData);
+      toast.success("Vital signs recorded");
+      
+      const heartRateHigh = vitalData.heartRate > 105;
+      const bloodPressureAbnormal = vitalData.bloodPressureSystolic > 130 || vitalData.bloodPressureDiastolic < 70;
+      const temperatureHigh = vitalData.temperature > 100;
+      
+      const conditionsMet = [heartRateHigh, bloodPressureAbnormal, temperatureHigh].filter(Boolean).length;
+      
+      if (conditionsMet >= 2) {
+        try {
+          const contacts = await apiClient.getContacts();
+          
+          if (contacts.length > 0) {
+            const alertPromises = contacts.map(contact => 
+              apiClient.sendEmergencyAlert(contact.id).catch(err => {
+                console.error(`Failed to alert ${contact.name}:`, err);
+              })
+            );
+            
+            await Promise.all(alertPromises);
+            
+            toast.error("⚠️ CRITICAL: Multiple vital signs out of range! Opening Phone Link for emergency contacts...", {
+              duration: 10000,
+            });
+            
+            // Automatically open Phone Link for all contacts
+            contacts.forEach((contact, index) => {
+              setTimeout(() => {
+                window.open(`tel:${contact.phone}`, '_blank');
+                toast.info(`Opening Phone Link for ${contact.name} - ${contact.phone}`, {
+                  duration: 3000,
+                });
+              }, index * 1000);
+            });
+          } else {
+            toast.warning("⚠️ CRITICAL VITALS but no emergency contacts found. Please add emergency contacts.");
+          }
+        } catch (error) {
+          console.error("Failed to send emergency alerts:", error);
+          toast.error("Failed to alert emergency contacts");
+        }
+      }
+      
+      setFormData({
+        heartRate: "",
+        bloodPressureSystolic: "",
+        bloodPressureDiastolic: "",
+        oxygenSaturation: "",
+        temperature: "",
+      });
+      
+      loadVitals();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to record vitals");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleInputChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const formatDate = (dateString: string) => {
@@ -66,7 +154,7 @@ const VitalMonitor = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-secondary to-background">
+    <div className="min-h-screen bg-gradient-to-br from-background via-secondary to-background pb-24 md:pb-0">
       <div className="container mx-auto px-4 py-8 max-w-6xl">
         <div className="mb-6">
           <Button variant="ghost" onClick={() => navigate("/dashboard")}>
@@ -85,26 +173,105 @@ const VitalMonitor = () => {
           </div>
         </div>
 
-        {/* Info Card */}
-        <Card className="mb-6 border-info/50 bg-info/5">
+        <Card className="mb-6">
           <CardHeader>
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-info" />
-              <CardTitle className="text-info">Sensor Integration</CardTitle>
-            </div>
+            <CardTitle>Record Your Vital Signs</CardTitle>
             <CardDescription>
-              In a full implementation, this would connect to wearable health sensors. 
-              For now, you can simulate readings for testing purposes.
+              Enter your vital readings manually. Emergency alerts will be sent if 2+ thresholds are exceeded.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={handleSimulateReading}>
-              Simulate Vital Reading
-            </Button>
+            <div className="mb-4 p-3 bg-warning/10 border border-warning/30 rounded-lg">
+              <p className="text-sm font-medium text-warning mb-1">⚠️ Emergency Thresholds</p>
+              <p className="text-xs text-muted-foreground">
+                Heart Rate &gt; 105 BPM • Blood Pressure &gt; 130/&lt;70 mmHg • Temperature &gt; 100°F
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                If 2 or more thresholds are exceeded, emergency contacts will be alerted automatically.
+              </p>
+            </div>
+            <form onSubmit={handleSubmitVitals} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="heartRate">Heart Rate (BPM) *</Label>
+                  <Input
+                    id="heartRate"
+                    type="number"
+                    placeholder="e.g., 72"
+                    min="40"
+                    max="200"
+                    value={formData.heartRate}
+                    onChange={(e) => handleInputChange("heartRate", e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="systolic">Blood Pressure - Systolic (mmHg) *</Label>
+                  <Input
+                    id="systolic"
+                    type="number"
+                    placeholder="e.g., 120"
+                    min="70"
+                    max="200"
+                    value={formData.bloodPressureSystolic}
+                    onChange={(e) => handleInputChange("bloodPressureSystolic", e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="diastolic">Blood Pressure - Diastolic (mmHg) *</Label>
+                  <Input
+                    id="diastolic"
+                    type="number"
+                    placeholder="e.g., 80"
+                    min="40"
+                    max="130"
+                    value={formData.bloodPressureDiastolic}
+                    onChange={(e) => handleInputChange("bloodPressureDiastolic", e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="oxygen">Oxygen Saturation (%) *</Label>
+                  <Input
+                    id="oxygen"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., 98.5"
+                    min="70"
+                    max="100"
+                    value={formData.oxygenSaturation}
+                    onChange={(e) => handleInputChange("oxygenSaturation", e.target.value)}
+                    required
+                  />
+                </div>
+                
+                <div className="space-y-2">
+                  <Label htmlFor="temperature">Temperature (°F) *</Label>
+                  <Input
+                    id="temperature"
+                    type="number"
+                    step="0.1"
+                    placeholder="e.g., 98.6"
+                    min="95"
+                    max="105"
+                    value={formData.temperature}
+                    onChange={(e) => handleInputChange("temperature", e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              
+              <Button type="submit" disabled={isSubmitting} className="w-full md:w-auto">
+                {isSubmitting ? "Recording..." : "Record Vital Signs"}
+              </Button>
+            </form>
           </CardContent>
         </Card>
 
-        {/* Latest Reading */}
         {vitals.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <Card>
@@ -115,7 +282,7 @@ const VitalMonitor = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{vitals[0].heart_rate}</div>
+                <div className="text-3xl font-bold">{vitals[0].heartRate}</div>
                 <p className="text-xs text-muted-foreground">BPM</p>
               </CardContent>
             </Card>
@@ -129,7 +296,7 @@ const VitalMonitor = () => {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold">
-                  {vitals[0].blood_pressure_systolic}/{vitals[0].blood_pressure_diastolic}
+                  {vitals[0].bloodPressureSystolic}/{vitals[0].bloodPressureDiastolic}
                 </div>
                 <p className="text-xs text-muted-foreground">mmHg</p>
               </CardContent>
@@ -143,7 +310,7 @@ const VitalMonitor = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-3xl font-bold">{vitals[0].oxygen_saturation}</div>
+                <div className="text-3xl font-bold">{vitals[0].oxygenSaturation}</div>
                 <p className="text-xs text-muted-foreground">%</p>
               </CardContent>
             </Card>
@@ -163,7 +330,6 @@ const VitalMonitor = () => {
           </div>
         )}
 
-        {/* History */}
         <Card>
           <CardHeader>
             <CardTitle>Reading History</CardTitle>
@@ -174,7 +340,7 @@ const VitalMonitor = () => {
               <p className="text-center text-muted-foreground py-8">Loading...</p>
             ) : vitals.length === 0 ? (
               <p className="text-center text-muted-foreground py-8">
-                No vital readings yet. Click "Simulate Vital Reading" to add one.
+                No vital readings yet. Enter your vital signs above to get started.
               </p>
             ) : (
               <div className="space-y-4">
@@ -186,17 +352,17 @@ const VitalMonitor = () => {
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4 flex-1">
                       <div>
                         <p className="text-xs text-muted-foreground">Heart Rate</p>
-                        <p className="font-medium">{vital.heart_rate} BPM</p>
+                        <p className="font-medium">{vital.heartRate} BPM</p>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground">BP</p>
                         <p className="font-medium">
-                          {vital.blood_pressure_systolic}/{vital.blood_pressure_diastolic}
+                          {vital.bloodPressureSystolic}/{vital.bloodPressureDiastolic}
                         </p>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground">SpO2</p>
-                        <p className="font-medium">{vital.oxygen_saturation}%</p>
+                        <p className="font-medium">{vital.oxygenSaturation}%</p>
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground">Temp</p>
@@ -204,7 +370,7 @@ const VitalMonitor = () => {
                       </div>
                       <div>
                         <p className="text-xs text-muted-foreground">Time</p>
-                        <p className="text-xs">{formatDate(vital.created_at)}</p>
+                        <p className="text-xs">{formatDate(vital.createdAt)}</p>
                       </div>
                     </div>
                   </div>
@@ -214,6 +380,8 @@ const VitalMonitor = () => {
           </CardContent>
         </Card>
       </div>
+
+      <MobileBottomNav />
     </div>
   );
 };

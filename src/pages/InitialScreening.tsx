@@ -5,8 +5,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/api-client";
 import { useToast } from "@/hooks/use-toast";
+import { MobileBottomNav } from "@/components/navigation/MobileBottomNav";
+import { useAuth } from "@/hooks/useAuth";
 
 const questions = [
   {
@@ -46,18 +48,43 @@ const questions = [
   },
   {
     id: 8,
-    question: "How often have you had trouble concentrating on things?",
+    question: "How often have you had trouble concentrating on things, such as reading the newspaper or watching television?",
     category: "adhd"
   },
   {
     id: 9,
-    question: "How often have you experienced unwanted thoughts that you can't control?",
+    question: "How often have you experienced unwanted thoughts, images, or impulses that you can't control?",
     category: "ocd"
   },
   {
     id: 10,
-    question: "How often have you felt the need to repeat certain behaviors or rituals?",
+    question: "How often have you felt the need to repeat certain behaviors or mental acts (like washing hands, checking things, or counting)?",
     category: "ocd"
+  },
+  {
+    id: 11,
+    question: "How often have you experienced periods of elevated mood, increased energy, or feeling unusually 'high' or irritable?",
+    category: "bipolar"
+  },
+  {
+    id: 12,
+    question: "How often have you had difficulty sitting still or felt restless?",
+    category: "adhd"
+  },
+  {
+    id: 13,
+    question: "How often have you experienced flashbacks or intrusive memories of a traumatic event?",
+    category: "ptsd"
+  },
+  {
+    id: 14,
+    question: "How often have you avoided places, people, or activities that remind you of a traumatic event?",
+    category: "ptsd"
+  },
+  {
+    id: 15,
+    question: "How often have you had thoughts of hurting yourself or ending your life?",
+    category: "depression"
   }
 ];
 
@@ -71,6 +98,7 @@ const options = [
 const InitialScreening = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { refreshProfile } = useAuth();
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [responses, setResponses] = useState<Record<number, number>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -134,16 +162,34 @@ const InitialScreening = () => {
 
     if (totalScore >= 10) {
       if (primaryCategory === "depression") {
-        diagnosis = primaryScore >= 6 ? "Possible Major Depressive Disorder" : "Mild depressive symptoms";
+        if (categoryScores["bipolar"] && categoryScores["bipolar"] >= 3) {
+          diagnosis = "Possible Bipolar Disorder - Further evaluation recommended";
+        } else {
+          diagnosis = primaryScore >= 6 ? "Possible Major Depressive Disorder" : "Mild depressive symptoms";
+        }
       } else if (primaryCategory === "anxiety") {
-        diagnosis = primaryScore >= 6 ? "Possible Generalized Anxiety Disorder" : "Mild anxiety symptoms";
+        if (categoryScores["ptsd"] && categoryScores["ptsd"] >= 4) {
+          diagnosis = "Possible Post-Traumatic Stress Disorder (PTSD)";
+        } else {
+          diagnosis = primaryScore >= 6 ? "Possible Generalized Anxiety Disorder" : "Mild anxiety symptoms";
+        }
       } else if (primaryCategory === "ocd") {
-        diagnosis = primaryScore >= 4 ? "Possible Obsessive-Compulsive Disorder" : "Mild OCD symptoms";
+        diagnosis = primaryScore >= 4 ? "Possible Obsessive-Compulsive Disorder (OCD)" : "Mild OCD symptoms";
       } else if (primaryCategory === "adhd") {
-        diagnosis = "Possible attention-related concerns";
+        diagnosis = primaryScore >= 4 ? "Possible Attention-Deficit/Hyperactivity Disorder (ADHD)" : "Mild attention-related concerns";
+      } else if (primaryCategory === "ptsd") {
+        diagnosis = primaryScore >= 4 ? "Possible Post-Traumatic Stress Disorder (PTSD)" : "Mild trauma-related symptoms";
+      } else if (primaryCategory === "bipolar") {
+        diagnosis = primaryScore >= 3 ? "Possible Bipolar Disorder - Further evaluation recommended" : "Mild mood-related concerns";
       } else if (primaryCategory === "sleep") {
         diagnosis = "Sleep disorder screening recommended";
       }
+    }
+
+    // Check for suicidal ideation (critical)
+    if (responses[15] && responses[15] >= 2) {
+      severity = "Severe symptoms - Immediate attention required";
+      diagnosis = "URGENT: Please seek immediate professional help or contact emergency services";
     }
 
     return {
@@ -158,27 +204,43 @@ const InitialScreening = () => {
     setIsSubmitting(true);
     
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      // Check localStorage token directly using the correct keys from auth-utils
+      const token = localStorage.getItem("mindtrap_access_token");
+      const userId = localStorage.getItem("mindtrap_user_id");
+      const refreshToken = localStorage.getItem("mindtrap_refresh_token");
       
-      if (!user) {
+      console.log("Submitting screening - Token exists:", !!token, "RefreshToken exists:", !!refreshToken, "UserId:", userId);
+      
+      if (!token || !userId) {
+        console.error("No token or userId found in localStorage");
         toast({
           title: "Error",
-          description: "You must be logged in",
+          description: "You must be logged in. Please sign in again.",
           variant: "destructive"
         });
+        navigate("/auth");
+        setIsSubmitting(false);
         return;
       }
+      
+      // Don't verify token here - let the API client handle it
+      // The API client will automatically refresh tokens if needed
+      // Even if checkAuth failed earlier, the token might still be valid
+      console.log("Proceeding with screening submission - API client will handle token validation...");
 
       const result = analyzeResponses();
+      console.log("Calling completeInitialScreening API...");
+      console.log("Token at submission time:", localStorage.getItem("mindtrap_access_token") ? "EXISTS" : "MISSING");
 
-      await supabase.from("assessments").insert({
-        user_id: user.id,
-        assessment_type: "phq9", // Using existing type for now
-        responses: responses,
-        score: result.score,
-        severity: result.severity,
-        diagnosis: result.diagnosis
-      });
+      // Complete initial screening via API (it will use the token from localStorage)
+      // The API client will automatically handle token refresh if needed
+      const response = await apiClient.completeInitialScreening(responses);
+      console.log("Screening saved successfully:", response);
+
+      // Refresh profile to update initialScreeningCompleted flag in useAuth state
+      console.log("Refreshing profile in auth state...");
+      await refreshProfile();
+      console.log("Profile refreshed successfully");
 
       toast({
         title: "Screening complete",
@@ -187,17 +249,67 @@ const InitialScreening = () => {
 
       navigate("/assessment-results", { 
         state: { 
-          assessmentResult: result,
+          assessmentResult: response.result,
           isInitialScreening: true
         } 
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving screening:", error);
-      toast({
-        title: "Error",
-        description: "Failed to save screening results",
-        variant: "destructive"
+      console.error("Error details:", {
+        message: error.message,
+        status: error.status,
+        statusCode: error.statusCode,
+        isNetworkError: error.isNetworkError,
+        isCorsError: error.isCorsError,
+        token: localStorage.getItem("mindtrap_access_token") ? "EXISTS" : "MISSING"
       });
+      
+      const statusCode = error.statusCode || error.status;
+      
+      // Handle network/CORS errors
+      if (error.isNetworkError || error.isCorsError || statusCode === 0) {
+        toast({
+          title: "Connection Error",
+          description: error.message || "Cannot connect to backend. Please ensure the backend is running on port 8080.",
+          variant: "destructive"
+        });
+        setIsSubmitting(false);
+        return;
+      }
+      
+      // Only clear tokens and redirect on definite 401
+      if (statusCode === 401) {
+        console.error("401 Unauthorized - clearing tokens");
+        toast({
+          title: "Session Expired",
+          description: "Your session has expired. Please sign in again.",
+          variant: "destructive"
+        });
+        localStorage.removeItem("mindtrap_access_token");
+        localStorage.removeItem("mindtrap_refresh_token");
+        localStorage.removeItem("mindtrap_user_id");
+        navigate("/auth");
+      } else if (error.message?.includes("401") || error.message?.includes("Unauthorized")) {
+        // Also check error message for 401
+        console.error("401 in error message - clearing tokens");
+        toast({
+          title: "Session Expired",
+          description: "Your session has expired. Please sign in again.",
+          variant: "destructive"
+        });
+        localStorage.removeItem("mindtrap_access_token");
+        localStorage.removeItem("mindtrap_refresh_token");
+        localStorage.removeItem("mindtrap_user_id");
+        navigate("/auth");
+      } else {
+        // For other errors (500, etc.), show error but keep tokens
+        console.warn("Non-401 error, keeping tokens:", error.message);
+        toast({
+          title: "Error",
+          description: error.message || "Failed to save screening results. Please try again.",
+          variant: "destructive"
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -206,7 +318,7 @@ const InitialScreening = () => {
   const progress = ((currentQuestion + 1) / questions.length) * 100;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-secondary to-background">
+    <div className="min-h-screen bg-gradient-to-br from-background via-secondary to-background pb-24 md:pb-0">
       <div className="container mx-auto px-4 py-8 max-w-2xl">
         <Card className="border-2">
           <CardHeader>
@@ -264,7 +376,19 @@ const InitialScreening = () => {
             </div>
           </CardContent>
         </Card>
+
+        <div className="mt-6">
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            onClick={() => navigate("/dashboard")}
+          >
+            Go to Dashboard
+          </Button>
+        </div>
       </div>
+      <MobileBottomNav />
     </div>
   );
 };

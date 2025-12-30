@@ -1,22 +1,19 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 import { Heart, Brain, Shield, MapPin } from "lucide-react";
 
 const Index = () => {
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
 
   useEffect(() => {
     // Check if user is already logged in
-    const checkUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        navigate("/dashboard");
-      }
-    };
-    checkUser();
-  }, [navigate]);
+    if (isAuthenticated) {
+      navigate("/dashboard");
+    }
+  }, [isAuthenticated, navigate]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-secondary to-background">

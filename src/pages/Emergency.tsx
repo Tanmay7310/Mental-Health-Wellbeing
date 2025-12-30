@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,36 +9,37 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { toast } from "sonner";
 import { Phone, Plus, Trash2, ArrowLeft, AlertCircle } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { MobileBottomNav } from "@/components/navigation/MobileBottomNav";
 
 const Emergency = () => {
   const navigate = useNavigate();
+  const { user, loading: authLoading } = useAuth();
   const [contacts, setContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isAdding, setIsAdding] = useState(false);
 
   useEffect(() => {
-    loadContacts();
-  }, []);
+    if (authLoading) return;
 
-  const loadContacts = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    const token = localStorage.getItem("mindtrap_access_token");
+    if (!token && !user) {
       navigate("/auth");
       return;
     }
 
-    const { data, error } = await supabase
-      .from("emergency_contacts")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+    loadContacts();
+  }, [authLoading, navigate]);
 
-    if (error) {
-      toast.error("Failed to load contacts");
-    } else {
+  const loadContacts = async () => {
+    setLoading(true);
+    try {
+      const data = await apiClient.getContacts();
       setContacts(data || []);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to load contacts");
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleAddContact = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -45,23 +47,21 @@ const Emergency = () => {
     setIsAdding(true);
 
     const formData = new FormData(e.currentTarget);
-    const { data: { user } } = await supabase.auth.getUser();
-
-    const { error } = await supabase.from("emergency_contacts").insert({
-      user_id: user!.id,
-      name: formData.get("name") as string,
-      phone: formData.get("phone") as string,
-      relationship: formData.get("relationship") as string,
-    });
-
-    if (error) {
-      toast.error("Failed to add contact");
-    } else {
+    
+    try {
+      await apiClient.createContact({
+        name: formData.get("name") as string,
+        phone: formData.get("phone") as string,
+        relationship: formData.get("relationship") as string,
+      });
       toast.success("Contact added successfully");
       loadContacts();
       (e.target as HTMLFormElement).reset();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to add contact");
+    } finally {
+      setIsAdding(false);
     }
-    setIsAdding(false);
   };
 
   const handleDeleteContact = async (id: string, isDefault: boolean) => {
@@ -70,30 +70,30 @@ const Emergency = () => {
       return;
     }
 
-    const { error } = await supabase
-      .from("emergency_contacts")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      toast.error("Failed to delete contact");
-    } else {
+    try {
+      await apiClient.deleteContact(id);
       toast.success("Contact deleted");
       loadContacts();
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete contact");
     }
   };
 
   const handleEmergencyCall = async (contactId: string) => {
     const contact = contacts.find(c => c.id === contactId);
     if (contact) {
-      // In a real app, this would trigger actual emergency protocols
-      toast.success(`Emergency alert sent to ${contact.name}`);
-      window.location.href = `tel:${contact.phone}`;
+      try {
+        await apiClient.sendEmergencyAlert(contactId);
+        toast.success(`Emergency alert sent to ${contact.name}`);
+        window.location.href = `tel:${contact.phone}`;
+      } catch (error: any) {
+        toast.error(error.message || "Failed to send alert");
+      }
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-secondary to-background">
+    <div className="min-h-screen bg-gradient-to-br from-background via-secondary to-background pb-24 md:pb-0">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="mb-6">
           <Button variant="ghost" onClick={() => navigate("/dashboard")}>
@@ -217,6 +217,7 @@ const Emergency = () => {
           )}
         </div>
       </div>
+      <MobileBottomNav />
     </div>
   );
 };

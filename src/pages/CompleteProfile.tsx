@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useNavigate, useLocation } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
+import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,20 +11,55 @@ import { MapPin, Phone, User, Users } from "lucide-react";
 
 const CompleteProfile = () => {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user, loading: authLoading, refreshProfile } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
-  const [user, setUser] = useState<any>(null);
+  const [profile, setProfile] = useState<any>(null);
 
   useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+    const loadProfile = async () => {
+      if (authLoading) return;
+      
       if (!user) {
         navigate("/auth");
-      } else {
-        setUser(user);
+        return;
+      }
+
+      try {
+        const profileData = await apiClient.getProfile();
+
+        const state = location.state as any;
+        const returnTo = state?.returnTo as string | undefined;
+        const returnState = state?.returnState;
+        
+        if (!profileData.initialScreeningCompleted) {
+          toast.error("Please complete the initial screening first");
+          navigate("/initial-screening");
+          return;
+        }
+
+        if (profileData.homeAddress) {
+          // Profile already complete; if we were routed here as an onboarding gate,
+          // return to the original destination (e.g. assessment results).
+          if (returnTo && returnTo !== "/complete-profile") {
+            navigate(returnTo, { state: returnState, replace: true });
+          } else {
+            navigate("/dashboard");
+          }
+          return;
+        }
+
+        setProfile(profileData);
+      } catch (error: any) {
+        toast.error(error.message || "Failed to load profile");
+        if (error.message?.includes("401") || error.message?.includes("Unauthorized")) {
+          navigate("/auth");
+        }
       }
     };
-    getUser();
-  }, [navigate]);
+
+    loadProfile();
+  }, [user, authLoading, navigate, location.state]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -33,47 +69,50 @@ const CompleteProfile = () => {
     
     try {
       // Update profile
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .update({
-          full_name: formData.get("fullName") as string,
-          phone: formData.get("phone") as string,
-          home_address: formData.get("address") as string,
-          country: formData.get("country") as string,
-          pincode: formData.get("pincode") as string,
-        })
-        .eq("id", user.id);
-
-      if (profileError) throw profileError;
+      await apiClient.updateProfile({
+        phone: formData.get("phone") as string,
+        homeAddress: formData.get("address") as string,
+        country: formData.get("country") as string,
+        pincode: formData.get("pincode") as string,
+      });
 
       // Add emergency contacts
-      const contacts = [
-        {
-          user_id: user.id,
+      await Promise.all([
+        apiClient.createContact({
           name: formData.get("contact1Name") as string,
           phone: formData.get("contact1Phone") as string,
           relationship: formData.get("contact1Relation") as string,
-        },
-        {
-          user_id: user.id,
+        }),
+        apiClient.createContact({
           name: formData.get("contact2Name") as string,
           phone: formData.get("contact2Phone") as string,
           relationship: formData.get("contact2Relation") as string,
-        },
-      ];
-
-      const { error: contactsError } = await supabase
-        .from("emergency_contacts")
-        .insert(contacts);
-
-      if (contactsError) throw contactsError;
+        }),
+      ]);
 
       toast.success("Profile completed successfully!");
-      navigate("/dashboard");
+
+      // Refresh profile in auth state so GlobalLayout knows profile is complete
+      try {
+        await refreshProfile();
+      } catch (refreshError) {
+        // Don't fail the whole flow if refresh fails - the profile was saved successfully
+      }
+
+      const state = location.state as any;
+      const returnTo = state?.returnTo as string | undefined;
+      const returnState = state?.returnState;
+
+      if (returnTo && returnTo !== "/complete-profile") {
+        navigate(returnTo, { state: returnState, replace: true });
+      } else {
+        navigate("/dashboard");
+      }
     } catch (error: any) {
-      toast.error(error.message);
+      toast.error(error.message || "Failed to complete profile");
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   return (
@@ -99,7 +138,7 @@ const CompleteProfile = () => {
                   <Input
                     id="fullName"
                     name="fullName"
-                    defaultValue={user?.user_metadata?.full_name || ""}
+                    defaultValue={profile?.fullName || ""}
                     required
                   />
                 </div>

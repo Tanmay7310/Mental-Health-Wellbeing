@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -14,57 +15,110 @@ import {
   AlertCircle,
   Phone
 } from "lucide-react";
+import { MobileBottomNav } from "@/components/navigation/MobileBottomNav";
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState<any>(null);
+  const { user, loading: authLoading, logout } = useAuth();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [sosRunning, setSosRunning] = useState(false);
 
   useEffect(() => {
-    const checkUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
+    const loadProfile = async () => {
+      if (authLoading) return;
+      
+      // Check both user state and localStorage token
+      const token = localStorage.getItem("mindtrap_access_token");
+      if (!user && !token) {
         navigate("/auth");
         return;
       }
-      setUser(user);
-
-      // Fetch profile
-      const { data: profileData, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .maybeSingle();
-
-      if (error) {
-        console.error("Error fetching profile:", error);
-        toast.error("Failed to load profile");
-      } else if (!profileData || !profileData.home_address) {
-        // Profile incomplete, redirect to complete profile
-        navigate("/complete-profile");
-      } else {
-        setProfile(profileData);
+      
+      // If we have a token but user state isn't set yet, try to fetch profile anyway
+      // This handles the case where we just logged in and state hasn't updated yet
+      if (token && !user) {
+        // Wait a moment for state to potentially update
+        await new Promise(resolve => setTimeout(resolve, 200));
+        // If still no user, proceed with token-based auth
       }
-      setLoading(false);
-    };
 
-    checkUser();
+      try {
+        const profileData = await apiClient.getProfile();
+        
+        // Check if initial screening is completed
+        if (!profileData.initialScreeningCompleted) {
+          toast.info("Please complete the initial screening first");
+          navigate("/initial-screening");
+          setLoading(false);
+          return;
+        }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (event === "SIGNED_OUT") {
+        // Check if profile is complete
+        if (!profileData.homeAddress) {
+          navigate("/complete-profile");
+          setLoading(false);
+          return;
+        }
+
+        setProfile(profileData);
+      } catch (error: any) {
+        console.error("Error fetching profile:", error);
+        toast.error(error.message || "Failed to load profile");
+        if (error.message?.includes("401") || error.message?.includes("Unauthorized")) {
           navigate("/auth");
         }
+      } finally {
+        setLoading(false);
       }
-    );
+    };
 
-    return () => subscription.unsubscribe();
-  }, [navigate]);
+    loadProfile();
+  }, [user, authLoading, navigate]);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
-    toast.success("Logged out successfully");
+    await logout();
+  };
+
+  const handleSos = async () => {
+    if (sosRunning) return;
+    setSosRunning(true);
+
+    try {
+      const contacts = await apiClient.getContacts();
+
+      if (!contacts || contacts.length === 0) {
+        toast.warning("No emergency contacts found. Please add emergency contacts first.");
+        navigate("/emergency");
+        return;
+      }
+
+      const alertPromises = contacts.map((contact: any) =>
+        apiClient.sendEmergencyAlert(contact.id).catch((err: any) => {
+          console.error(`Failed to alert ${contact.name}:`, err);
+        })
+      );
+      await Promise.all(alertPromises);
+
+      toast.error("⚠️ CRITICAL: Opening Phone Link for emergency contacts...", {
+        duration: 10000,
+      });
+
+      // Automatically open Phone Link for all contacts (browser will still require confirmation)
+      contacts.forEach((contact: any, index: number) => {
+        setTimeout(() => {
+          window.open(`tel:${contact.phone}`, "_blank");
+          toast.info(`Opening Phone Link for ${contact.name} - ${contact.phone}`, {
+            duration: 3000,
+          });
+        }, index * 1000);
+      });
+    } catch (error) {
+      console.error("SOS failed:", error);
+      toast.error("Failed to trigger SOS");
+    } finally {
+      setSosRunning(false);
+    }
   };
 
   if (loading) {
@@ -124,7 +178,7 @@ const Dashboard = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-secondary to-background">
+    <div className="min-h-screen bg-gradient-to-br from-background via-secondary to-background pb-24 md:pb-0">
       {/* Header */}
       <div className="bg-card shadow-sm border-b">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
@@ -135,7 +189,7 @@ const Dashboard = () => {
             <div>
               <h1 className="text-xl font-bold">Mental Health Companion</h1>
               <p className="text-sm text-muted-foreground">
-                Welcome, {profile?.full_name}
+                Welcome, {profile?.fullName}
               </p>
             </div>
           </div>
@@ -148,6 +202,18 @@ const Dashboard = () => {
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
+        <div className="mb-6">
+          <Button
+            variant="destructive"
+            className="w-full"
+            onClick={handleSos}
+            disabled={sosRunning}
+          >
+            <Phone className="w-4 h-4 mr-2" />
+            {sosRunning ? "Sending SOS..." : "SOS"}
+          </Button>
+        </div>
+
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
           <Card className="hover:shadow-lg transition-shadow cursor-pointer" onClick={() => navigate("/vital-monitor")}>
@@ -219,6 +285,7 @@ const Dashboard = () => {
           </Card>
         </div>
       </div>
+      <MobileBottomNav />
     </div>
   );
 };

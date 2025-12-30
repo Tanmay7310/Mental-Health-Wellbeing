@@ -17,10 +17,16 @@ const AssessmentResults = () => {
   const [result, setResult] = useState<AssessmentResult | null>(null);
 
   useEffect(() => {
+    console.log('[AssessmentResults] Full location state:', location.state);
     const state = location.state as { assessmentResult?: AssessmentResult; isInitialScreening?: boolean };
+    console.log('[AssessmentResults] Parsed state:', state);
+    console.log('[AssessmentResults] Has assessmentResult?', !!state?.assessmentResult);
+    
     if (state?.assessmentResult) {
+      console.log('[AssessmentResults] Setting result:', state.assessmentResult);
       setResult(state.assessmentResult);
     } else {
+      console.log('[AssessmentResults] No assessment result found, redirecting to dashboard');
       navigate("/dashboard");
     }
   }, [location, navigate]);

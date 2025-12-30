@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { apiClient } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -29,6 +30,7 @@ const OPTIONS = [
 
 const AssessmentPHQ9 = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -54,24 +56,32 @@ const AssessmentPHQ9 = () => {
       return;
     }
 
+    if (!user) {
+      toast.error("You must be logged in");
+      navigate("/auth");
+      return;
+    }
+
     setIsSubmitting(true);
-    const { data: { user } } = await supabase.auth.getUser();
 
-    const score = calculateScore();
-    const { level, diagnosis } = getSeverity(score);
+    try {
+      const score = calculateScore();
+      const { level, diagnosis } = getSeverity(score);
 
-    const { error } = await supabase.from("assessments").insert({
-      user_id: user!.id,
-      assessment_type: "phq9",
-      score,
-      severity: level,
-      responses: answers,
-      diagnosis,
-    });
+      // Convert answers to numeric format for API
+      const responses: Record<string, number> = {};
+      Object.entries(answers).forEach(([key, value]) => {
+        responses[key] = parseInt(value);
+      });
 
-    if (error) {
-      toast.error("Failed to save assessment");
-    } else {
+      await apiClient.createAssessment({
+        type: "PHQ9",
+        responses,
+        score,
+        severity: level,
+        diagnosis,
+      });
+
       toast.success("Assessment completed!");
       navigate("/assessment-results", { 
         state: { 
@@ -83,8 +93,11 @@ const AssessmentPHQ9 = () => {
           } 
         } 
       });
+    } catch (error: any) {
+      toast.error(error.message || "Failed to save assessment");
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   const isComplete = Object.keys(answers).length === PHQ9_QUESTIONS.length;
