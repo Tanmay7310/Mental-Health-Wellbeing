@@ -16,13 +16,13 @@ function Stop-ProcessByPort {
             return
         }
 
-        $pid = $conn.OwningProcess
-        if (-not $pid) {
+        $processId = $conn.OwningProcess
+        if (-not $processId) {
             Write-Host "   Could not determine PID for $Name (port $Port)" -ForegroundColor Yellow
             return
         }
 
-        Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+        Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
         Write-Host "✅ $Name stopped (by port)" -ForegroundColor Green
     } catch {
         Write-Host "   Failed stopping $Name (port $Port): $($_.Exception.Message)" -ForegroundColor Yellow
