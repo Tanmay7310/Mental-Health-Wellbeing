@@ -12,17 +12,6 @@ dist
 dist-ssr
 *.local
 
-# Backend build artifacts
-backend/target/
-backend/.mvn/wrapper/
-*.jar
-*.war
-
-# IDE files
-.env
-.env.local
-*.iml
-
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
